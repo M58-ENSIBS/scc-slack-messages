@@ -24,27 +24,6 @@
         }
     },
     {
-        "type": "section",
-        "text": {
-            "type": "mrkdwn",
-            "text": "*Explanation:*\n<EXPLANATION>"
-        }
-    },
-    {
-        "type": "section",
-        "text": {
-            "type": "mrkdwn",
-            "text": "*Recommendation:*\n<RECOMMENDATION>"
-        }
-    },
-    {
-        "type": "section",
-        "text": {
-            "type": "mrkdwn",
-            "text": "*Instructions:*\n<INSTRUCT>"
-        }
-    },
-    {
         "type": "divider"
     }
 ]
