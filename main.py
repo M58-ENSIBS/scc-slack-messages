@@ -73,12 +73,13 @@ def merge_template(list_data, payload):
     """
     finding = payload.get("finding")
     resource = payload.get("resource")
+    source = payload.get("sourceProperties")
 
     org_id = finding.get("name").split("/")[1]
     finding_id = finding.get("name").split("/")[-1]
     source_id = finding.get("name").split("/")[3]
     severity = finding.get("severity")
-    if finding.get("category") == "Persistence: IAM Anomalous Grant" or finding.get("category") == "Persistence: Service Account Key Created":
+    if finding.get("category") == "Persistence: IAM Anomalous Grant" or finding.get("category") == "Persistence: Service Account Key Created" or finding.get("category") == "Persistence: New Geography":
         project_path = finding.get("logEntries")[0].get("cloudLoggingEntry").get("resourceContainer").replace("projects/", "")
     elif finding.get("category") == "Reverse Shell":
         project_path = finding.get("processes")[0].get("envVariables")[2].get("val")
@@ -113,42 +114,65 @@ def merge_template(list_data, payload):
 
     if finding.get("category") == "Persistence: IAM Anomalous Grant":
         binding = finding.get("iamBindings")[0]
-        receiver = binding.get("member")
+        grantee = binding.get("member")
         permission_added = binding.get("role")
-        giver = finding.get("access").get("principalEmail")
+        grantor = finding.get("access").get("principalEmail")
 
+        # Initialize variables for the temporary grant check
+        sensitive_role_grant = source.get("properties").get("sensitiveRoleGrant", {})
+        binding_deltas = sensitive_role_grant.get("bindingDeltas", [{}])
+        condition = binding_deltas[0].get("condition", {})
+
+        # Check if it is a temporary grant
+        if "Created by iam-temporary, please do not edit/remove manually." in condition.get("description", ""):
+            requested_time = condition.get("expression", "").split('timestamp("')[1].split('")')[0].replace("Z", "").replace("T", " ")
+            expires_text = f"Expires: {requested_time}"
+
+            # Add requested time section
+            list_data.append({
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": f"*:hourglass: IAM-Temporary Requested Time:*\n{expires_text}"
+                }
+            })
+
+        # Add the classic structure for all grants
         list_data.append({
             "type": "section",
             "text": {
                 "type": "mrkdwn",
-                "text": "*Giver:*\n<GIVER>"
+                "text": f"*Grantor:*\n{grantor}"
             }
         })
         list_data.append({
             "type": "section",
             "text": {
                 "type": "mrkdwn",
-                "text": "*Receiver:*\n<RECEIVER>"
+                "text": f"*Grantee:*\n{grantee}"
             }
         })
         list_data.append({
             "type": "section",
             "text": {
                 "type": "mrkdwn",
-                "text": "*Permission Added:*\n<PERMISSION>"
+                "text": f"*Permission Added:*\n{permission_added}"
             }
         })
+
+        # Add a divider to separate entries
         list_data.append({
             "type": "divider"
         })
 
+
         list_data[-4]["text"]["text"] = list_data[-4]["text"]["text"] \
-            .replace("<GIVER>", strip_quotes(giver))
+            .replace("<GIVER>", strip_quotes(grantor))
         list_data[-3]["text"]["text"] = list_data[-3]["text"]["text"] \
-            .replace("<RECEIVER>", strip_quotes(receiver))
+            .replace("<GRANTEE>", strip_quotes(grantee))
         list_data[-2]["text"]["text"] = list_data[-2]["text"]["text"] \
             .replace("<PERMISSION>", strip_quotes(permission_added))
-        
+                        
     elif finding.get("category") == "Reverse Shell":
         gitlab_runner_name = finding.get("kubernetes").get("pods")[0].get("name")
         gitlab_email = finding.get("processes")[0].get("envVariables")[12].get("val")
@@ -226,6 +250,59 @@ def merge_template(list_data, payload):
             .replace("<METHOD>", strip_quotes(method))
         list_data[-2]["text"]["text"] = list_data[-2]["text"]["text"] \
             .replace("<SERVICE_ACCOUNT>", strip_quotes(service_account))
+        
+    elif finding.get("category") == "Persistence: New Geography":
+        region = finding.get("access").get("callerIpGeo").get("regionCode")
+        region = f":flag-{region.lower()}:"
+        ip = finding.get("access").get("callerIp")
+        service = finding.get("access").get("methodName")
+        user = finding.get("access").get("principalEmail")
+
+        list_data.append({
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": "*Region:*\n<REGION>"
+            }
+        })
+
+        list_data.append({
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": "*IP:*\n<IP>"
+            }
+        })
+
+        list_data.append({
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": "*User:*\n<USER>"
+            }
+        })
+
+        list_data.append({
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": "*Service:*\n<SERVICE>"
+            }
+        })
+
+        list_data.append({
+            "type": "divider"
+        })
+
+        list_data[-5]["text"]["text"] = list_data[-5]["text"]["text"] \
+            .replace("<REGION>", strip_quotes(region))
+        list_data[-4]["text"]["text"] = list_data[-4]["text"]["text"] \
+            .replace("<IP>", strip_quotes(ip))
+        list_data[-3]["text"]["text"] = list_data[-3]["text"]["text"] \
+            .replace("<USER>", strip_quotes(user))
+        list_data[-2]["text"]["text"] = list_data[-2]["text"]["text"] \
+            .replace("<SERVICE>", strip_quotes(service))
+        
 
 def format_text(val, text2CodeBlocks: bool = False):
     """Function to format text for Slack.
@@ -280,7 +357,7 @@ def scc_slack_handler(event, context):
     CUSTOM_LOG_NAME = "scc_notifications_log"
     logging_client = logging.Client()
     logger = logging_client.logger(CUSTOM_LOG_NAME)
-    logger = logging_client.logger()
+    # logger = logging_client.logger()
 
     try:
         # PubSub messages come in encrypted
@@ -291,6 +368,6 @@ def scc_slack_handler(event, context):
 
 
 if __name__ == "__main__":
-    with open("test_sa.json", "rt") as testdata_f:
+    with open("test_temp.json", "rt") as testdata_f:
         testdata = json.load(testdata_f)
     message_post(testdata)
